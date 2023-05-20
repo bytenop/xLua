@@ -37,6 +37,8 @@ if (NOT LUA_VERSION)
     set(LUA_VERSION "5.3.5")
 endif()
 
+include(third_party/CMakeLists.txt)
+
 set(LUA_SRC_PATH lua-${LUA_VERSION}/src)
 set(LUAJIT_SRC_PATH luajit-2.1.0b3/src)
 
@@ -145,6 +147,7 @@ source_group_by_dir(${CMAKE_CURRENT_SOURCE_DIR} XLUA_CORE)
 
 if (APPLE)
     if (IOS)
+        ADD_DEFINITIONS(-DLUA_USE_IOS)
         set(CMAKE_OSX_ARCHITECTURES "$(ARCHS_STANDARD)")
         add_library(xlua STATIC
            ${LUA_CORE}
@@ -188,6 +191,14 @@ elseif ("${CMAKE_SYSTEM_NAME}" STREQUAL "Switch")
         ${THIRDPART_SRC}
     )
     target_compile_options(xlua PRIVATE -m64 -mcpu=cortex-a57+fp+simd+crypto+crc -fno-common -fno-short-enums -ffunction-sections -fdata-sections -fPIC -fms-extensions)
+elseif ("${CMAKE_SYSTEM_NAME}" STREQUAL "Emscripten")
+	add_library(xlua STATIC
+        ${LUA_CORE}
+        ${LUA_LIB}
+        ${LUA_SOCKET}
+        ${XLUA_CORE}
+        ${THIRDPART_SRC}
+    )
 else ( )
     add_library(xlua SHARED
         ${LUA_CORE}

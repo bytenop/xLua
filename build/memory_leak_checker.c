@@ -150,7 +150,7 @@ LUA_API void xlua_report_object_relationship(lua_State *L, ObjectRelationshipRep
 		{
 			LClosure *cl = gco2lcl(p);
 			lua_lock(L);
-			setclLvalue(L, L->top, cl);
+			setclLvalue2s(L, L->top.p, cl);
 			api_incr_top(L);
 			lua_unlock(L);
 			
