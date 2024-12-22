@@ -1,0 +1,15 @@
+#!/bin/bash
+FILES="makefile HISTORY README.md test.lua re.lua \
+  lpeg.html re.html lpeg-128.gif \
+  lpcap.h lpcode.h lpcset.h lpprint.h lptree.h lptypes.h lpvm.h \
+  lpcap.c lpcode.c lpcset.c lpprint.c lptree.c lpvm.c"
+NAME=lpeg-$1
+DIRN=versions/$NAME
+mkdir $DIRN
+cp $FILES $DIRN
+cd versions
+tar --create --gzip --file=$NAME.tar.gz $NAME
+# scp $NAME.tar.gz obaluae:public_html/lpeg/
+# ssh obaluae "rm public_html/lpeg/*.html"
+cd $NAME
+# scp *.html obaluae:public_html/lpeg/

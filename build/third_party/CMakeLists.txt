@@ -3,6 +3,7 @@ add_link_options($<$<CONFIG:RELEASE>:-s>)
 set(LPEG_SRC
     third_party/lpeg/lpcap.c
     third_party/lpeg/lpcode.c
+    third_party/lpeg/lpcset.c
     third_party/lpeg/lpprint.c
     third_party/lpeg/lptree.c
     third_party/lpeg/lpvm.c
@@ -25,13 +26,13 @@ set(LUA_CMSGPACK_SRC
 )
 
 set(NOPBYTE_SRC
-    third_party/nopbyte/lua-hashlib.c
-    third_party/nopbyte/lua-nopbyte.c
-    third_party/nopbyte/lua-observer.c
-    third_party/nopbyte/lua-packet.c
-    third_party/nopbyte/lua-random.c
-    third_party/nopbyte/lua-wordfilter.c
-    third_party/nopbyte/lua-zlib.c
+    third_party/nopbyte/lua_hashlib.c
+    third_party/nopbyte/lua_nopbyte.c
+    third_party/nopbyte/lua_observer.c
+    third_party/nopbyte/lua_packet.c
+    third_party/nopbyte/lua_random.c
+    third_party/nopbyte/lua_wordfilter.c
+    third_party/nopbyte/lua_zlib.c
 )
 
 set(SPROTO_SRC

@@ -5,6 +5,10 @@
  */
 
 #include <lauxlib.h>
+#include <lua.h>
+#include <luaconf.h>
+#include <stdlib.h>
+#include <zconf.h>
 #include <zlib.h>
 
 #if MAX_MEM_LEVEL >= 8
@@ -13,11 +17,10 @@
 #define DEF_MEM_LEVEL MAX_MEM_LEVEL
 #endif
 
-#define kChunkSize 0x2000
+#define BUFFER_SIZE 0x1000
 
 static const char *ModeOptions[] = {"zlib", "deflate", "gzip", NULL};
-static const int WindowBitsOptions[] = {MAX_WBITS, -MAX_WBITS,
-                                        MAX_WBITS | 0x10};
+static const int WindowBitsOptions[] = {MAX_WBITS, -MAX_WBITS, MAX_WBITS | 0x10};
 
 static void RaiseError(lua_State *L, int err) {
     switch (err) {
@@ -41,7 +44,7 @@ static void RaiseError(lua_State *L, int err) {
     }
 }
 
-static const void *GetData(lua_State *L, int *pindex, size_t *size) {
+static const void *CheckData(lua_State *L, int *pindex, size_t *size) {
     const void *data = NULL;
     int index = *pindex;
     int type = lua_type(L, index);
@@ -63,12 +66,12 @@ static const void *GetData(lua_State *L, int *pindex, size_t *size) {
 }
 
 static int Deflate(lua_State *L) {
-    size_t size;
+    size_t size = 0;
     int index = 1;
 
-    const char *data = (const char *)GetData(L, &index, &size);
+    const char *data = (const char *)CheckData(L, &index, &size);
     int mode = luaL_checkoption(L, index + 1, NULL, ModeOptions);
-    int level = luaL_optinteger(L, index + 2, Z_DEFAULT_COMPRESSION);
+    int level = (int)luaL_optinteger(L, index + 2, Z_DEFAULT_COMPRESSION);
 
     z_stream stream;
 
@@ -85,13 +88,13 @@ static int Deflate(lua_State *L) {
     stream.avail_in = size;
     stream.next_in = (Bytef *)data;
 
-    Bytef out[kChunkSize];
+    Bytef out[BUFFER_SIZE];
 
     luaL_Buffer b;
     luaL_buffinit(L, &b);
 
     do {
-        stream.avail_out = kChunkSize;
+        stream.avail_out = BUFFER_SIZE;
         stream.next_out = out;
 
         err = deflate(&stream, Z_FINISH);
@@ -100,7 +103,7 @@ static int Deflate(lua_State *L) {
             RaiseError(L, err);
         }
 
-        size_t have = kChunkSize - stream.avail_out;
+        size_t have = BUFFER_SIZE - stream.avail_out;
         lua_pushlstring(L, (const char *)out, have);
         luaL_addvalue(&b);
     } while (stream.avail_out == 0);
@@ -115,10 +118,10 @@ static int Deflate(lua_State *L) {
 }
 
 static int Inflate(lua_State *L) {
-    size_t size;
+    size_t size = 0;
     int index = 1;
 
-    const char *data = (const char *)GetData(L, &index, &size);
+    const char *data = (const char *)CheckData(L, &index, &size);
     int mode = luaL_checkoption(L, index + 1, NULL, ModeOptions);
     int partial = lua_toboolean(L, index + 2);
 
@@ -136,13 +139,13 @@ static int Inflate(lua_State *L) {
     stream.avail_in = size;
     stream.next_in = (Bytef *)data;
 
-    Bytef out[kChunkSize];
+    Bytef out[BUFFER_SIZE];
 
     luaL_Buffer b;
     luaL_buffinit(L, &b);
 
     do {
-        stream.avail_out = kChunkSize;
+        stream.avail_out = BUFFER_SIZE;
         stream.next_out = out;
 
         err = inflate(&stream, Z_NO_FLUSH);
@@ -151,7 +154,7 @@ static int Inflate(lua_State *L) {
             RaiseError(L, err);
         }
 
-        size_t have = kChunkSize - stream.avail_out;
+        size_t have = BUFFER_SIZE - stream.avail_out;
         lua_pushlstring(L, (const char *)out, have);
         luaL_addvalue(&b);
     } while (stream.avail_out == 0);
@@ -172,9 +175,9 @@ static int Inflate(lua_State *L) {
 LUAMOD_API int luaopen_NopByte_ZLib(lua_State *L) {
     luaL_Reg l[] = {
         // clang-format off
-        {"Deflate", Deflate},
-        {"Inflate", Inflate},
-        {NULL, NULL},
+        { "Deflate", Deflate },
+        { "Inflate", Inflate },
+        { NULL, NULL },
         // clang-format on
     };
 

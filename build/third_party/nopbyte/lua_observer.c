@@ -5,27 +5,31 @@
  */
 
 #include <lauxlib.h>
+#include <lua.h>
+#include <luaconf.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 // field of NotifyNode
-const int field_name = 1;
-const int field_parent = 2;
-const int field_notify = 3;
-const int field_children = 4;
-const int field_lockNotify = 5;
-const int field_lockChildren = 6;
+static const int field_name = 1;
+static const int field_parent = 2;
+static const int field_notify = 3;
+static const int field_children = 4;
+static const int field_lockNotify = 5;
+static const int field_lockChildren = 6;
 
 // field of NotifyTree
-const int field_root = 1;
-const int field_enabled = 2;
+static const int field_root = 1;
+static const int field_enabled = 2;
 
 #define getuvfield(L, idx, name) lua_getiuservalue(L, (idx), field_##name)
 #define setuvfield(L, idx, name) lua_setiuservalue(L, (idx), field_##name)
 
 #ifdef NDEBUG
 // field of Observer
-static int field___raw = 1;
-static int field___root = 2;
-static int field___notifyPool = 3;
+static const int field___raw = 1;
+static const int field___root = 2;
+static const int field___notifyPool = 3;
 
 #define getfield(L, idx, name) lua_rawgetp(L, (idx), &field_##name)
 #define setfield(L, idx, name) lua_rawsetp(L, (idx), &field_##name)
@@ -36,7 +40,7 @@ static int field___notifyPool = 3;
 #define getfield(L, idx, name) lua_getfield(L, (idx), #name)
 #define setfield(L, idx, name) lua_setfield(L, (idx), #name)
 
-#define ENTER_STACK(L) int __enterTop = lua_gettop(L);
+#define ENTER_STACK(L) int __enterTop = lua_gettop(L)
 #define LEAVE_STACK(L, n)                                                \
     int __leaveTop = lua_gettop(L);                                      \
     if (__leaveTop - __enterTop != (n)) {                                \
@@ -44,10 +48,12 @@ static int field___notifyPool = 3;
     }
 #endif
 
-static const char ObserverLib[] = "NopByte.Observer";
+static const char *ObserverLib = "NopByte.Observer";
+static const int cachedKeyPathPlaceholder;
 
 static int NotifyTreeDispatchNotify(lua_State *L);
 static int ObserverNew(lua_State *L);
+static int ObserverTest(lua_State *L, int index);
 
 static int TableNext(lua_State *L) {
     luaL_checktype(L, 1, LUA_TTABLE);
@@ -55,10 +61,10 @@ static int TableNext(lua_State *L) {
 
     if (lua_next(L, 1)) {
         return 2;
-    } else {
-        lua_pushnil(L);
-        return 1;
     }
+
+    lua_pushnil(L);
+    return 1;
 }
 
 static int BuildKeyPath(lua_State *L) {
@@ -101,8 +107,7 @@ static int BuildKeyPath(lua_State *L) {
 
             index += n;
         } else {
-            return luaL_error(L, "unsupported key type %s",
-                              lua_typename(L, type));
+            return luaL_error(L, "unsupported key type %s", lua_typename(L, type));
         }
     }
 
@@ -168,67 +173,26 @@ static int CachedKeyPath(lua_State *L) {
 static void PushKeyPath(lua_State *L, int index) {
     index = lua_absindex(L, index);
 
-    lua_rawgetp(L, LUA_REGISTRYINDEX, (const void *)CachedKeyPath);
+    lua_rawgetp(L, LUA_REGISTRYINDEX, &cachedKeyPathPlaceholder);
     lua_pushvalue(L, index);
     lua_gettable(L, -2);
     lua_replace(L, -2);
 }
 
-static int TestObserver(lua_State *L, int index) {
-    if (!lua_getmetatable(L, index)) {
-        return 0;
-    }
-
-    luaL_getmetatable(L, ObserverLib);
-    int equal = lua_rawequal(L, -1, -2);
-    lua_pop(L, 2);
-
-    return equal;
-}
-
-static void CheckObserver(lua_State *L, int index) {
-    if (!TestObserver(L, index)) {
-        luaL_typeerror(L, index, ObserverLib);
-    }
-}
-
-static void CheckObserverRoot(lua_State *L, int index) {
-    CheckObserver(L, index);
-
-    if (getfield(L, index, __root) == LUA_TNIL) {
-        luaL_argerror(L, index, "root observer expected");
-    }
-
-    lua_pop(L, 1);
-}
-
-static void PushObserverNotify(lua_State *L, int index) {
-    getfield(L, index, __notifyPool);
-
-    lua_pushnil(L);
-    if (lua_next(L, -2)) {
-        lua_pop(L, 1);
-        lua_replace(L, -2);
-        return;
-    }
-
-    luaL_error(L, "notify node expected in observer");
-}
-
 static int GetValueWithPath(lua_State *L) {
     luaL_checktype(L, 2, LUA_TTABLE);
 
-    int len = lua_rawlen(L, 2);
-    int start = luaL_optinteger(L, 3, 1);
+    lua_Unsigned len = lua_rawlen(L, 2);
+    lua_Unsigned start = luaL_optinteger(L, 3, 1);
 
     lua_pushvalue(L, 1);
 
-    for (int i = start; i <= len; ++i) {
+    for (lua_Unsigned i = start; i <= len; ++i) {
         if (lua_isnil(L, -1)) {
             break;
         }
 
-        lua_rawgeti(L, 2, i);
+        lua_rawgeti(L, 2, (lua_Integer)i);
         lua_gettable(L, -2);
         lua_replace(L, -2);
     }
@@ -240,22 +204,21 @@ static int SetValueWithPath(lua_State *L) {
     luaL_checktype(L, 2, LUA_TTABLE);
     luaL_checkany(L, 3);
 
-    int len = lua_rawlen(L, 2);
+    lua_Unsigned len = lua_rawlen(L, 2);
     lua_pushvalue(L, 1);
 
-    for (int i = 1; i <= len; ++i) {
+    for (lua_Unsigned i = 1; i <= len; ++i) {
         if (i < len) {
-            lua_rawgeti(L, 2, i);
+            lua_rawgeti(L, 2, (lua_Integer)i);
             lua_gettable(L, -2);
             lua_replace(L, -2);
         } else {
             int type = lua_type(L, -1);
             if (type != LUA_TTABLE) {
-                return luaL_error(L, "find %s value in path",
-                                  lua_typename(L, type));
+                return luaL_error(L, "find %s value in path", lua_typename(L, type));
             }
 
-            lua_rawgeti(L, 2, i);
+            lua_rawgeti(L, 2, (lua_Integer)i);
             lua_pushvalue(L, 3);
             lua_settable(L, -3);
         }
@@ -276,8 +239,7 @@ static int JoinNotify(lua_State *L) {
         if (lua_rawget(L, -4) != LUA_TNIL) {
             const char *last = lua_tostring(L, -1);
             const char *curr = lua_tostring(L, -2);
-            return luaL_error(L, "Cannot mount on multi path: %s and %s", last,
-                              curr);
+            return luaL_error(L, "Cannot mount on multi path: %s and %s", last, curr);
         }
 
         lua_pop(L, 1);
@@ -301,7 +263,7 @@ static int JoinNotify(lua_State *L) {
 
     lua_pushnil(L);
     while (lua_next(L, -2)) {
-        if (!TestObserver(L, -1)) {
+        if (!ObserverTest(L, -1)) {
             lua_pop(L, 1);
             continue;
         }
@@ -345,7 +307,7 @@ static int LeaveNotify(lua_State *L) {
 
     lua_pushnil(L);
     while (lua_next(L, -2)) {
-        if (!TestObserver(L, -1)) {
+        if (!ObserverTest(L, -1)) {
             lua_pop(L, 1);
             continue;
         }
@@ -364,7 +326,7 @@ static int LeaveNotify(lua_State *L) {
 static int NotifyParent(lua_State *L) {
     luaL_checkany(L, 4);
 
-    lua_rawgetp(L, LUA_REGISTRYINDEX, (const void *)CachedKeyPath);
+    lua_rawgetp(L, LUA_REGISTRYINDEX, &cachedKeyPathPlaceholder);
     getfield(L, 1, __notifyPool);
 
     lua_pushnil(L);
@@ -389,7 +351,7 @@ static int NotifyParent(lua_State *L) {
 static int NotifyChild(lua_State *L) {
     luaL_checkany(L, 4);
 
-    lua_rawgetp(L, LUA_REGISTRYINDEX, (const void *)CachedKeyPath);
+    lua_rawgetp(L, LUA_REGISTRYINDEX, &cachedKeyPathPlaceholder);
     getfield(L, 1, __notifyPool);
 
     lua_pushnil(L);
@@ -495,8 +457,7 @@ static int NotifyNodeFindChild(lua_State *L, int node, int name) {
     return 1;
 }
 
-static void NotifyNodeRegisterCallback(lua_State *L, int node, int path,
-                                       int callback) {
+static void NotifyNodeRegisterCallback(lua_State *L, int node, int path, int callback) {
     ENTER_STACK(L);
 
     node = lua_absindex(L, node);
@@ -600,8 +561,7 @@ static void NotifyNodeRemoveCallback(lua_State *L, int node, int callback) {
     LEAVE_STACK(L, 0);
 }
 
-static void NotifyNodeInvokeCallback(lua_State *L, int node, int base,
-                                     int argc) {
+static void NotifyNodeInvokeCallback(lua_State *L, int node, int base, int argc) {
     ENTER_STACK(L);
 
     node = lua_absindex(L, node);
@@ -673,8 +633,8 @@ static void NotifyNodeInvokeCallback(lua_State *L, int node, int base,
     LEAVE_STACK(L, 0);
 }
 
-static void NotifyNodeDispatchNotify(lua_State *L, int node, int path,
-                                     int index, int argc) {
+static void NotifyNodeDispatchNotify(lua_State *L, int node, int path, int index,
+                                     int argc) {
     ENTER_STACK(L);
 
     node = lua_absindex(L, node);
@@ -789,8 +749,7 @@ static int MetatableIndexAndReport(lua_State *L) {
     getfield(L, 1, __notifyPool);
 
     lua_pushvalue(L, lua_upvalueindex(1));
-    if (lua_rawget(L, -2) != LUA_TNIL &&
-        lua_toboolean(L, lua_upvalueindex(3))) {
+    if (lua_rawget(L, -2) != LUA_TNIL && lua_toboolean(L, lua_upvalueindex(3))) {
         lua_pushvalue(L, lua_upvalueindex(2));
 
         lua_pushcfunction(L, BuildKeyPath);
@@ -818,7 +777,7 @@ static int MetatableNewIndex(lua_State *L) {
         return 0;
     }
 
-    if (lua_type(L, -1) == LUA_TTABLE && TestObserver(L, -1)) {
+    if (lua_type(L, -1) == LUA_TTABLE && ObserverTest(L, -1)) {
         lua_pushcfunction(L, LeaveNotify);
         lua_pushvalue(L, -2);
         getfield(L, 1, __notifyPool);
@@ -874,8 +833,49 @@ static int MetatablePairs(lua_State *L) {
 
 static int MetatableLen(lua_State *L) {
     getfield(L, 1, __raw);
-    lua_pushinteger(L, lua_rawlen(L, -1));
+    lua_pushinteger(L, (lua_Integer)lua_rawlen(L, -1));
     return 1;
+}
+
+static int ObserverTest(lua_State *L, int index) {
+    if (!lua_getmetatable(L, index)) {
+        return 0;
+    }
+
+    luaL_getmetatable(L, ObserverLib);
+    int equal = lua_rawequal(L, -1, -2);
+    lua_pop(L, 2);
+
+    return equal;
+}
+
+static void ObserverCheck(lua_State *L, int index) {
+    if (!ObserverTest(L, index)) {
+        luaL_typeerror(L, index, ObserverLib);
+    }
+}
+
+static void ObserverCheckRoot(lua_State *L, int index) {
+    ObserverCheck(L, index);
+
+    if (getfield(L, index, __root) == LUA_TNIL) {
+        luaL_argerror(L, index, "root observer expected");
+    }
+
+    lua_pop(L, 1);
+}
+
+static void ObserverPushNotify(lua_State *L, int index) {
+    getfield(L, index, __notifyPool);
+
+    lua_pushnil(L);
+    if (lua_next(L, -2)) {
+        lua_pop(L, 1);
+        lua_replace(L, -2);
+        return;
+    }
+
+    luaL_error(L, "notify node expected in observer");
 }
 
 static int ObserverNew(lua_State *L) {
@@ -886,6 +886,7 @@ static int ObserverNew(lua_State *L) {
     }
 
     int root = lua_gettop(L) == 1;
+
     if (root) {
         lua_settop(L, 3);
     } else {
@@ -921,7 +922,7 @@ static int ObserverNew(lua_State *L) {
     lua_replace(L, 3);
 
     if (lua_getmetatable(L, 1)) {
-        if (!TestObserver(L, 1)) {
+        if (!ObserverTest(L, 1)) {
             return 0;
         }
 
@@ -984,7 +985,7 @@ static int ObserverNew(lua_State *L) {
 }
 
 static int ObserverRaw(lua_State *L) {
-    CheckObserver(L, 1);
+    ObserverCheck(L, 1);
 
     if (lua_isnone(L, 2)) {
         getfield(L, 1, __raw);
@@ -999,7 +1000,7 @@ static int ObserverRaw(lua_State *L) {
 }
 
 static int ObserverGet(lua_State *L) {
-    CheckObserver(L, 1);
+    ObserverCheck(L, 1);
     luaL_checktype(L, 2, LUA_TSTRING);
 
     lua_pushcfunction(L, GetValueWithPath);
@@ -1011,7 +1012,7 @@ static int ObserverGet(lua_State *L) {
 }
 
 static int ObserverSet(lua_State *L) {
-    CheckObserver(L, 1);
+    ObserverCheck(L, 1);
     luaL_checktype(L, 2, LUA_TSTRING);
     luaL_checkany(L, 3);
 
@@ -1041,11 +1042,11 @@ static int ObserverNext(lua_State *L) {
 }
 
 static int ObserverActiveNotify(lua_State *L) {
-    CheckObserverRoot(L, 1);
+    ObserverCheckRoot(L, 1);
     luaL_checktype(L, 2, LUA_TBOOLEAN);
 
     lua_pushcfunction(L, NotifyTreeActiveNotify);
-    PushObserverNotify(L, 1);
+    ObserverPushNotify(L, 1);
     lua_pushvalue(L, 2);
     lua_call(L, 2, 1);
 
@@ -1060,8 +1061,8 @@ static int ObserverReportPath(lua_State *L) {
         return 0;
     }
 
-    CheckObserverRoot(L, 1);
-    PushObserverNotify(L, 1);
+    ObserverCheckRoot(L, 1);
+    ObserverPushNotify(L, 1);
 
     luaL_checktype(L, 2, LUA_TFUNCTION);
     lua_pushvalue(L, 2);
@@ -1093,12 +1094,12 @@ static int ObserverToggleReport(lua_State *L) {
 }
 
 static int ObserverSetupWatch(lua_State *L) {
-    CheckObserverRoot(L, 1);
+    ObserverCheckRoot(L, 1);
     luaL_checktype(L, 2, LUA_TSTRING);
     luaL_checktype(L, 3, LUA_TFUNCTION);
 
     lua_pushcfunction(L, NotifyTreeRegisterCallback);
-    PushObserverNotify(L, 1);
+    ObserverPushNotify(L, 1);
     PushKeyPath(L, 2);
     lua_pushvalue(L, 3);
     lua_call(L, 3, 0);
@@ -1108,12 +1109,12 @@ static int ObserverSetupWatch(lua_State *L) {
 }
 
 static int ObserverRemoveWatch(lua_State *L) {
-    CheckObserverRoot(L, 1);
+    ObserverCheckRoot(L, 1);
     luaL_checktype(L, 2, LUA_TSTRING);
     luaL_checktype(L, 3, LUA_TFUNCTION);
 
     lua_pushcfunction(L, NotifyTreeRemoveCallback);
-    PushObserverNotify(L, 1);
+    ObserverPushNotify(L, 1);
     PushKeyPath(L, 2);
     lua_pushvalue(L, 3);
     lua_call(L, 3, 0);
@@ -1124,32 +1125,32 @@ static int ObserverRemoveWatch(lua_State *L) {
 LUAMOD_API int luaopen_NopByte_Observer(lua_State *L) {
     luaL_Reg metatable[] = {
         // clang-format off
-        {"__index", MetatableIndex},
-        {"__newindex", MetatableNewIndex},
-        {"__pairs", MetatablePairs},
-        {"__len", MetatableLen},
-        {NULL, NULL},
+        { "__index", MetatableIndex },
+        { "__newindex", MetatableNewIndex },
+        { "__pairs", MetatablePairs },
+        { "__len", MetatableLen },
+        { NULL, NULL },
         // clang-format on
     };
 
     luaL_Reg Observer[] = {
         // clang-format off
-        {"BuildKeyPath", BuildKeyPath},
-        {"ParseKeyPath", ParseKeyPath},
-        {"CachedKeyPath", NULL},
+        { "BuildKeyPath", BuildKeyPath },
+        { "ParseKeyPath", ParseKeyPath },
+        { "CachedKeyPath", NULL },
 
-        {"New", ObserverNew},
-        {"Raw", ObserverRaw},
-        {"Get", ObserverGet},
-        {"Set", ObserverSet},
-        {"Next", ObserverNext},
+        { "New", ObserverNew },
+        { "Raw", ObserverRaw },
+        { "Get", ObserverGet },
+        { "Set", ObserverSet },
+        { "Next", ObserverNext },
 
-        {"ActiveNotify", ObserverActiveNotify},
-        {"ReportPath", ObserverReportPath},
-        {"ToggleReport", ObserverToggleReport},
-        {"SetupWatch", ObserverSetupWatch},
-        {"RemoveWatch", ObserverRemoveWatch},
-        {NULL, NULL},
+        { "ActiveNotify", ObserverActiveNotify },
+        { "ReportPath", ObserverReportPath },
+        { "ToggleReport", ObserverToggleReport },
+        { "SetupWatch", ObserverSetupWatch },
+        { "RemoveWatch", ObserverRemoveWatch },
+        { NULL, NULL },
         // clang-format on
     };
 
@@ -1173,7 +1174,7 @@ LUAMOD_API int luaopen_NopByte_Observer(lua_State *L) {
 
     lua_pushvalue(L, -1);
     lua_setfield(L, -3, "CachedKeyPath");
-    lua_rawsetp(L, LUA_REGISTRYINDEX, (const void *)CachedKeyPath);
+    lua_rawsetp(L, LUA_REGISTRYINDEX, &cachedKeyPathPlaceholder);
 
     return 1;
 }

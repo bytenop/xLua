@@ -5,27 +5,30 @@
  */
 
 #include <lauxlib.h>
+#include <lua.h>
+#include <luaconf.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
-#define kChunkSize 0x2000
-#define kBufferSize (kChunkSize + 0x10)
+#define CHUNK_SIZE 0x2000
+#define BUFFER_SIZE (CHUNK_SIZE + 0x10)
 
 static void PackUInt16(uint8_t *buf, uint16_t val) {
-    buf[0] = (val >> 8) & 0xff;
-    buf[1] = val & 0xff;
+    buf[0] = val & 0xff;
+    buf[1] = (val >> 8) & 0xff;
 }
 
 static int EncodePacket(lua_State *L) {
     size_t len;
     const char *str = luaL_checklstring(L, 1, &len);
-    uint32_t chunkSize = luaL_optinteger(L, 2, kChunkSize);
+    uint32_t chunkSize = luaL_optinteger(L, 2, CHUNK_SIZE);
 
-    if (chunkSize > kChunkSize) {
-        chunkSize = kChunkSize;
+    if (chunkSize > CHUNK_SIZE) {
+        chunkSize = CHUNK_SIZE;
     }
 
-    uint8_t buf[kBufferSize];
+    uint8_t buf[BUFFER_SIZE];
 
     if (len <= chunkSize) {
         buf[2] = 0;
@@ -39,7 +42,7 @@ static int EncodePacket(lua_State *L) {
         return 2;
     }
 
-    int chunkCount = (len - 1) / chunkSize + 1;
+    int chunkCount = (int)((len - 1) / chunkSize + 1);
     lua_createtable(L, chunkCount, 0);
 
     for (int i = 1; i <= chunkCount; ++i) {
@@ -78,7 +81,7 @@ static int DecodePacket(lua_State *L) {
         return 1;
     }
 
-    lua_pushboolean(L, buf[0] == 0xff);
+    lua_pushboolean(L, buf[0] == 0xcc);
     return 2;
 }
 
@@ -86,8 +89,7 @@ static int ParsePacket(lua_State *L) {
     const char *data = NULL;
     size_t size;
 
-    int type = lua_type(L, 1);
-    if (type == LUA_TSTRING) {
+    if (lua_type(L, 1) == LUA_TSTRING) {
         data = lua_tolstring(L, 1, &size);
     } else {
         data = (const char *)lua_touserdata(L, 1);
@@ -107,10 +109,10 @@ static int ParsePacket(lua_State *L) {
 LUAMOD_API int luaopen_NopByte_Packet_Core(lua_State *L) {
     luaL_Reg l[] = {
         // clang-format off
-        {"Encode", EncodePacket},
-        {"Decode", DecodePacket},
-        {"Parse", ParsePacket},
-        {NULL, NULL},
+        { "Encode", EncodePacket },
+        { "Decode", DecodePacket },
+        { "Parse", ParsePacket },
+        { NULL, NULL },
         // clang-format on
     };
 

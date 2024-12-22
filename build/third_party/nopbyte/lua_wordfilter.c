@@ -5,7 +5,11 @@
  */
 
 #include <lauxlib.h>
+#include <lua.h>
+#include <luaconf.h>
 #include <stdlib.h>
+
+typedef unsigned int utf8_t;
 
 enum {
     kTableInitCapa = 1,
@@ -19,7 +23,7 @@ typedef enum {
 
 typedef struct {
     Flag flag;
-    int key;
+    utf8_t key;
     int prev;
     int next;
     void *value;
@@ -36,12 +40,12 @@ static HashTable *wordFilter = NULL;
 
 static HashTable *HashTableCreate(int capa) {
     HashTable *self = (HashTable *)malloc(sizeof(*self));
-    if (!self) {
+    if (self == NULL) {
         return NULL;
     }
 
-    HashNode *nodes = (HashNode *)malloc(sizeof(HashNode) * capa);
-    if (!nodes) {
+    HashNode *nodes = (HashNode *)malloc(capa * sizeof(*nodes));
+    if (nodes == NULL) {
         free(self);
         return NULL;
     }
@@ -50,17 +54,17 @@ static HashTable *HashTableCreate(int capa) {
         nodes[i].flag = kFlagNone;
     }
 
-    self->nodes = nodes;
     self->capa = capa;
     self->size = 0;
     self->free = 0;
+    self->nodes = nodes;
 
     return self;
 }
 
 static void HashTableRelease(HashTable *self) {
     for (int i = 0; i < self->capa; ++i) {
-        HashNode *node = self->nodes + i;
+        HashNode *node = &self->nodes[i];
         if (node->flag != kFlagNone) {
             HashTable *value = (HashTable *)node->value;
             if (value) {
@@ -73,9 +77,9 @@ static void HashTableRelease(HashTable *self) {
     free(self);
 }
 
-static HashNode *HashTableFind(HashTable *self, int key) {
-    int slot = (unsigned int)key % self->capa;
-    HashNode *node = self->nodes + slot;
+static HashNode *HashTableFind(HashTable *self, utf8_t key) {
+    int slot = (int)(key % self->capa);
+    HashNode *node = &self->nodes[slot];
 
     while (node->flag != kFlagNone) {
         if (node->key == key) {
@@ -95,21 +99,22 @@ static HashNode *HashTableFind(HashTable *self, int key) {
 
 static HashNode *HashTableSpace(HashTable *self) {
     while (self->free < self->capa) {
-        HashNode *node = self->nodes + self->free++;
+        HashNode *node = &self->nodes[self->free++];
         if (node->flag == kFlagNone) {
             return node;
         }
     }
+
     return NULL;
 }
 
-static HashNode *HashTableInsert(HashTable *self, int key);
+static HashNode *HashTableInsert(HashTable *self, utf8_t key);
 
 static int HashTableGrow(HashTable *self) {
-    int capa = (unsigned int)self->capa << 1u;
-    HashNode *nodes = (HashNode *)malloc(sizeof(HashNode) * capa);
+    int capa = self->capa << 1;
+    HashNode *nodes = (HashNode *)malloc(capa * sizeof(*nodes));
 
-    if (!nodes) {
+    if (nodes == NULL) {
         return -1;
     }
 
@@ -117,28 +122,28 @@ static int HashTableGrow(HashTable *self) {
         nodes[i].flag = kFlagNone;
     }
 
-    int oldCapa = self->capa;
-    HashNode *oldNodes = self->nodes;
+    int capaLast = self->capa;
+    HashNode *nodesLast = self->nodes;
 
-    self->nodes = nodes;
     self->capa = capa;
     self->size = 0;
     self->free = 0;
+    self->nodes = nodes;
 
-    for (int i = 0; i < oldCapa; ++i) {
-        HashNode *oldNode = oldNodes + i;
-        if (oldNode->flag != kFlagNone) {
-            HashNode *newNode = HashTableInsert(self, oldNode->key);
-            newNode->flag = oldNode->flag;
-            newNode->value = oldNode->value;
+    for (int i = 0; i < capaLast; ++i) {
+        HashNode *lastNode = &nodesLast[i];
+        if (lastNode->flag != kFlagNone) {
+            HashNode *currNode = HashTableInsert(self, lastNode->key);
+            currNode->flag = lastNode->flag;
+            currNode->value = lastNode->value;
         }
     }
 
-    free(oldNodes);
+    free(nodesLast);
     return 0;
 }
 
-static HashNode *HashTableInsert(HashTable *self, int key) {
+static HashNode *HashTableInsert(HashTable *self, utf8_t key) {
     HashNode *node = HashTableFind(self, key);
     if (node) {
         return node;
@@ -150,38 +155,38 @@ static HashNode *HashTableInsert(HashTable *self, int key) {
         }
     }
 
-    int slot = (unsigned int)key % self->capa;
+    int slot = (int)(key % self->capa);
     node = self->nodes + slot;
 
     if (node->flag == kFlagNone) {
         node->prev = -1;
         node->next = -1;
     } else {
-        HashNode *free = HashTableSpace(self);
-        int freeSlot = free - self->nodes;
-        int wantSlot = (unsigned int)node->key % self->capa;
+        HashNode *freeNode = HashTableSpace(self);
+        int freeSlot = (int)(freeNode - self->nodes);
+        int mainSlot = (int)(node->key % self->capa);
 
-        if (wantSlot == slot) {
-            free->prev = wantSlot;
-            free->next = node->next;
+        if (mainSlot == slot) {
+            freeNode->prev = mainSlot;
+            freeNode->next = node->next;
 
             if (node->next != -1) {
-                HashNode *nnode = self->nodes + node->next;
+                HashNode *nnode = &self->nodes[node->next];
                 nnode->prev = freeSlot;
             }
 
             node->next = freeSlot;
-            node = free;
+            node = freeNode;
         } else {
-            HashNode *pnode = self->nodes + node->prev;
+            HashNode *pnode = &self->nodes[node->prev];
             pnode->next = freeSlot;
 
             if (node->next != -1) {
-                HashNode *nnode = self->nodes + node->next;
+                HashNode *nnode = &self->nodes[node->next];
                 nnode->prev = freeSlot;
             }
 
-            *free = *node;
+            *freeNode = *node;
             node->prev = -1;
             node->next = -1;
         }
@@ -195,8 +200,8 @@ static HashNode *HashTableInsert(HashTable *self, int key) {
     return node;
 }
 
-static inline void CheckWordFilter(lua_State *L, const HashTable *wordFilter) {
-    if (!wordFilter) {
+static void CheckWordFilter(lua_State *L, const HashTable *wordFilter) {
+    if (wordFilter == NULL) {
         luaL_error(L, "WordFilter has not been initialized");
     }
 }
@@ -209,7 +214,7 @@ static int WordFilterInitialize(lua_State *L) {
     }
 
     wordFilter = HashTableCreate(kTableInitCapa);
-    if (!wordFilter) {
+    if (wordFilter == NULL) {
         return luaL_error(L, "oom");
     }
 
@@ -235,18 +240,18 @@ static int WordFilterBlock(lua_State *L) {
     HashNode *node = NULL;
 
     for (int i = 1; i <= top; ++i) {
-        if (node && !table) {
+        if (node && table == NULL) {
             table = HashTableCreate(kTableInitCapa);
-            if (!table) {
+            if (table == NULL) {
                 return luaL_error(L, "oom");
             }
             node->value = table;
         }
 
-        int key = luaL_checkinteger(L, i);
+        utf8_t key = (utf8_t)luaL_checkinteger(L, i);
         node = HashTableInsert(table, key);
 
-        if (!node) {
+        if (node == NULL) {
             return luaL_error(L, "oom");
         }
 
@@ -271,9 +276,10 @@ static int WordFilterFilter(lua_State *L) {
         int leaf = 0;
 
         for (int j = i; j <= top; ++j) {
-            int key = luaL_checkinteger(L, j);
+            utf8_t key = (utf8_t)luaL_checkinteger(L, j);
             HashNode *node = HashTableFind(table, key);
-            if (!node) {
+
+            if (node == NULL) {
                 break;
             }
 
@@ -282,7 +288,7 @@ static int WordFilterFilter(lua_State *L) {
             }
 
             table = (HashTable *)node->value;
-            if (!table) {
+            if (table == NULL) {
                 break;
             }
         }
@@ -304,11 +310,11 @@ static int WordFilterFilter(lua_State *L) {
 LUAMOD_API int luaopen_NopByte_WordFilter_Core(lua_State *L) {
     luaL_Reg l[] = {
         // clang-format off
-        {"Initialize", WordFilterInitialize},
-        {"Release", WordFilterRelease},
-        {"Block", WordFilterBlock},
-        {"Filter", WordFilterFilter},
-        {NULL, NULL},
+        { "Initialize", WordFilterInitialize },
+        { "Release", WordFilterRelease },
+        { "Block", WordFilterBlock },
+        { "Filter", WordFilterFilter },
+        { NULL, NULL },
         // clang-format on
     };
 

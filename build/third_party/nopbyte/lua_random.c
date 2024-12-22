@@ -5,7 +5,10 @@
  */
 
 #include <lauxlib.h>
+#include <lua.h>
+#include <luaconf.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <time.h>
 
 typedef uint32_t Rand32;
@@ -14,13 +17,13 @@ typedef struct {
     Rand32 s[4];
 } RandState;
 
-static const char RandomLib[] = "NopByte.Random";
+static const char *RandomLib = "NopByte.Random";
 
-static inline lua_Number r2d(Rand32 x) {
+static lua_Number r2d(Rand32 x) {
     return x * 1.0 / (Rand32)~0;
 }
 
-static inline Rand32 rotl(Rand32 x, int k) {
+static Rand32 rotl(Rand32 x, int k) {
     return (x << k) | (x >> (32 - k));
 }
 
@@ -64,8 +67,15 @@ static Rand32 project(Rand32 ran, Rand32 n, RandState *state) {
     return ran;
 }
 
+static RandState *RandStateCheck(lua_State *L, int i) {
+    return (RandState *)luaL_checkudata(L, i, RandomLib);
+}
+
 static int RandomNew(lua_State *L) {
-    Rand32 s0, s1, s2, s3;
+    Rand32 s0;
+    Rand32 s1;
+    Rand32 s2;
+    Rand32 s3;
 
     if (lua_isnone(L, 2)) {
         s0 = time(NULL);
@@ -94,9 +104,12 @@ static int RandomNew(lua_State *L) {
 }
 
 static int RandomRandom(lua_State *L) {
-    RandState *state = (RandState *)luaL_checkudata(L, 1, RandomLib);
+    RandState *state = RandStateCheck(L, 1);
     Rand32 v = next(state->s); /* next pseudo-random value */
-    lua_Integer low, up, p;
+
+    lua_Integer low;
+    lua_Integer up;
+    lua_Integer p;
 
     switch (lua_gettop(L)) { /* check number of arguments */
         case 1: { /* no arguments */
@@ -136,11 +149,10 @@ static int RandomRandom(lua_State *L) {
 }
 
 static int RandomJump(lua_State *L) {
-    static const Rand32 JUMP[] = {0x8764000b, 0xf542d2d3, 0x6fa035c3,
-                                  0x77f2db5b};
+    static const Rand32 JUMP[] = {0x8764000b, 0xf542d2d3, 0x6fa035c3, 0x77f2db5b};
     const int size = sizeof(JUMP) / sizeof(*JUMP);
 
-    RandState *state = (RandState *)luaL_checkudata(L, 1, RandomLib);
+    RandState *state = RandStateCheck(L, 1);
     Rand32 *s = state->s;
 
     Rand32 s0 = 0;
@@ -169,7 +181,7 @@ static int RandomJump(lua_State *L) {
 }
 
 static int RandomDump(lua_State *L) {
-    RandState *state = (RandState *)luaL_checkudata(L, 1, RandomLib);
+    RandState *state = RandStateCheck(L, 1);
     Rand32 *s = state->s;
 
     lua_pushinteger(L, s[0]);
@@ -181,7 +193,7 @@ static int RandomDump(lua_State *L) {
 }
 
 static int RandomHash(lua_State *L) {
-    RandState *state = (RandState *)luaL_checkudata(L, 1, RandomLib);
+    RandState *state = RandStateCheck(L, 1);
     Rand32 *s = state->s;
     Rand32 c[4] = {s[0], s[1], s[2], s[3]};
 
@@ -189,15 +201,15 @@ static int RandomHash(lua_State *L) {
     return 1;
 }
 
-LUAMOD_API int luaopen_NopByte_Random(lua_State *L) {
+LUAMOD_API int luaopen_NopByte_Random_Core(lua_State *L) {
     luaL_Reg l[] = {
         // clang-format off
-        {"__index", NULL},
-        {"Random", RandomRandom},
-        {"Jump", RandomJump},
-        {"Dump", RandomDump},
-        {"Hash", RandomHash},
-        {NULL, NULL},
+        { "__index", NULL },
+        { "Random", RandomRandom },
+        { "Jump", RandomJump },
+        { "Dump", RandomDump },
+        { "Hash", RandomHash },
+        { NULL, NULL },
         // clang-format on
     };
 
